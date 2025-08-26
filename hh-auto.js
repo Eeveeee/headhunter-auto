@@ -1,6 +1,6 @@
 // TODO: instead of timers use  some  method  like  checkInDOM() with MutationObserver or requestAnimationFrame
 // TODO: use localStorage for vacancies
-// TODO: use localStorage for vacancies
+// TODO: add apply button content checking(already applied)
 
 const COVER_LETTER_TEXT = "PLACEHOLDER"; // your cover letter (!NON-EMPTY!)
 const RESTART_ON_ERROR = false; // be aware of potential memory leak
@@ -117,6 +117,7 @@ navigation.addEventListener("navigate", redirectHandler);
 const runTasks = async () => {
   vacanciesSearchHref = window.location.href;
   try {
+    let overfill = false;
     const vacancies = getVacancies();
 
     for (vacancy of vacancies) {
@@ -124,6 +125,11 @@ const runTasks = async () => {
       const foundVacancy = currentVacanices.find(
         (v) => v.vacancyId === vacancy.vacancyId,
       );
+      const total = appliedAmount + vacanciesWithRedirectLinks.size;
+      if (total >= APPLY_DAY_LIMIT) {
+        overfill = true;
+        break;
+      }
       if (!foundVacancy) {
         continue;
       }
@@ -175,6 +181,15 @@ const runTasks = async () => {
     console.log(
       SCRIPT_PREFIX,
       "APPLY DAY LIMIT REACHED, SCRIPT HAS BEEN STOPPED",
+    );
+    return;
+  }
+
+  if (overfill) {
+    console.log(
+      SCRIPT_PREFIX,
+      "DAY LIMIT REACHED, THERE IS REDIRECT LINKS:",
+      vacanciesWithRedirectLinks,
     );
     return;
   }
