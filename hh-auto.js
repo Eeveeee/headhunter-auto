@@ -1,25 +1,66 @@
 // TODO: instead of timers use  some  method  like  checkInDOM() with MutationObserver or requestAnimationFrame
 // TODO: use localStorage for vacancies
 // TODO: add apply button content checking(already applied)
-
-const COVER_LETTER_TEXT = "PLACEHOLDER"; // your cover letter (!NON-EMPTY!)
+// TODO: add menu element with all unhandled links(clickable)
+// TODO: handle another country alert
+// TODO: fix bug with double apply if redirected
+// TODO: fix pagination
+// TODO: instead of iterational method  use function  calling on  DOM  update
+const COVER_LETTER_TEXT = "__PLACEHOLDER__"; // your cover letter (!NON-EMPTY!)
 const RESTART_ON_ERROR = false; // be aware of potential memory leak
 const NEXT_PAGE_LOADING_TIMER_MS = 6000; //paginator next page loading time
 const VACANCY_APPLY_TIMER_MS = 3000; // job apply query loading time
 const RENDER_TIMER_MS = 100; // timer for DOM rearrange and render
 const SCRIPT_PREFIX = "----AUTO_HH----"; // prefix to filter logs from other junk
 const APPLY_DAY_LIMIT = 200; // headhunter apply limit
+const REDIRECT_VACANCY_IDS_LOCAL_STORAGE_KEY = "REDIRECT_VACANCY_IDS";
 
 let currentVacancy;
 let appliedAmount = 0;
 let inLimit = false;
 let currentPageNumber = Number(getCurrentPageElement().innerText);
-let pageNumberOnRedirect = currentPageNumber;
 const visitedSet = new Set([]);
 const vacanciesWithRedirectLinks = new Set([]);
 let vacanciesSearchHref = null;
 let vacancyClick = false;
 
+function addRedirectedVacancyIdToLocalStorage(id) {
+  console.log("ADD VACANDY ID: ", id);
+  const prevData =
+    JSON.parse(
+      window.localStorage.getItem(REDIRECT_VACANCY_IDS_LOCAL_STORAGE_KEY),
+    ) || [];
+  const newData = JSON.stringify(Array.from(new Set([...prevData, id])));
+  window.localStorage.setItem(REDIRECT_VACANCY_IDS_LOCAL_STORAGE_KEY, newData);
+}
+function getRedirectedVacancyIdsFromLocalStorage() {
+  return new Set(
+    JSON.parse(
+      window.localStorage.getItem(REDIRECT_VACANCY_IDS_LOCAL_STORAGE_KEY),
+    ) || [],
+  );
+}
+
+function createForceStartButton() {
+  const myDiv = document.querySelector(".HH-MainContent");
+  const myNewNode = document.createElement("button");
+  const textInside = document.createTextNode("START AUTO-HH");
+  myNewNode.addEventListener("click", runTasks);
+  Object.assign(myNewNode.style, {
+    position: "fixed",
+    top: 0,
+    right: 0,
+    "z-index": 99999,
+    background: "red",
+    color: "white",
+    padding: "10px",
+    margin: "50px",
+  });
+
+  myNewNode.setAttribute("id", "forceStartButton");
+  myNewNode.appendChild(textInside);
+  myDiv.appendChild(myNewNode);
+}
 function checkForApplyLimitAlert() {
   return !!document
     .getElementById("dialog-description")
@@ -74,10 +115,20 @@ function getPages() {
     pageNum: idx,
   }));
 }
+
+async function goToNextPage() {
+  const nextPageBtn = document.querySelector("[data-qa^='pager-next']");
+  if (nextPageBtn) {
+    nextPageBtn.click();
+  }
+  await wait(NEXT_PAGE_LOADING_TIMER_MS);
+}
+
 function getVacancies() {
   const vacancies = Array.from(
     document.querySelectorAll("[class^='vacancy-card']"),
   );
+  const redirected = getRedirectedVacancyIdsFromLocalStorage();
   return vacancies.reduce((acc, current) => {
     const btn = current.querySelector(
       "[data-qa='vacancy-serp__vacancy_response']",
@@ -87,7 +138,9 @@ function getVacancies() {
       vacancyApplyBtnEl: btn,
       vacancyHref: btn?.href,
       vacancyId: btn?.href && getVacancyId(btn?.href),
+      vacancyText: current.innerText,
     };
+    if (redirected.has(vacancy.vacancyId)) return acc;
     if (
       vacancy.vacancyEl &&
       vacancy.vacancyApplyBtnEl &&
@@ -102,25 +155,48 @@ function getVacancies() {
 function findVacancyById(id) {
   return getVacancies().find((el) => el.vacancyId === id);
 }
+
+window.setInterval(() => {
+  if (!document.getElementById("forceStartButton")) createForceStartButton();
+}, 9500);
+
 async function redirectHandler(e) {
-  if (window.location.href === vacanciesSearchHref) return;
-  if (!vacancyClick) return;
+  await wait(VACANCY_APPLY_TIMER_MS / 2);
 
-  if (currentVacancy.vacancyId)
-    vacanciesWithRedirectLinks.add(vacancy.vacancyHref);
-
-  history.back();
+  if (
+    e.navigationType === "push" &&
+    vacanciesSearchHref !== e.destination.url &&
+    currentVacancy
+  ) {
+    vacanciesWithRedirectLinks.add(currentVacancy?.vacancyHref);
+    addRedirectedVacancyIdToLocalStorage(currentVacancy?.vacancyId);
+    console.log(SCRIPT_PREFIX, "REDIRECT: GOING BACK");
+    history.back();
+  }
 }
 
 navigation.addEventListener("navigate", redirectHandler);
 
-const runTasks = async () => {
+async function runTasks() {
   vacanciesSearchHref = window.location.href;
   try {
     let overfill = false;
     const vacancies = getVacancies();
 
     for (vacancy of vacancies) {
+      vacancyRedirect = false;
+
+      console.log(
+        SCRIPT_PREFIX,
+        "CURRENT STATE",
+        "\nCURRENT VACANCY: ",
+        vacancy,
+        "\nVISITED VACANCIES LINKS: ",
+        visitedSet,
+        "\nUNHANDLED VACANCIES LINKS: ",
+        vacanciesWithRedirectLinks,
+      );
+
       const currentVacanices = getVacancies();
       const foundVacancy = currentVacanices.find(
         (v) => v.vacancyId === vacancy.vacancyId,
@@ -137,6 +213,8 @@ const runTasks = async () => {
       foundVacancy.vacancyEl.scrollIntoView();
       vacancyClick = true;
       foundVacancy.vacancyApplyBtnEl.click();
+      await wait(VACANCY_APPLY_TIMER_MS);
+
       if (checkForApplyLimitAlert()) {
         inLimit = true;
         break;
@@ -194,8 +272,8 @@ const runTasks = async () => {
     return;
   }
 
-  const pages = getPages();
-  const nextPageInPaginator = pages[currentPageNumber]?.pageEl;
+  // const pages = getPages();
+  // const nextPageInPaginator = pages[currentPageNumber]?.pageEl;
   console.log(
     SCRIPT_PREFIX,
     "UNHANDLED VACANCIES LINKS:",
@@ -207,12 +285,10 @@ const runTasks = async () => {
     appliedAmount - vacanciesWithRedirectLinks.size,
   );
 
-  if (nextPageInPaginator) {
-    currentPageNumber++;
-    nextPageInPaginator.click();
-    await wait(NEXT_PAGE_LOADING_TIMER_MS);
-    runTasks();
-  }
-};
-
-runTasks();
+  // nextPageInPaginator.click();
+  // await wait(NEXT_PAGE_LOADING_TIMER_MS);
+  currentPageNumber++;
+  await goToNextPage();
+  runTasks();
+}
+createForceStartButton();
